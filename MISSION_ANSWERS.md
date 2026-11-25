@@ -443,11 +443,32 @@ Public URL: `python check_production_ready.py --public-url https://agent-product
 
 ## AI log
 
-| Phần | Hỏi AI gì | Nhận được gì | Tự sửa và kiểm tra thế nào |
-|------|-----------|--------------|----------------------------|
+Toàn bộ bài được làm cùng **Claude Code (Opus 5.5)** trong một phiên làm việc. Mình giao từng checkpoint bằng chỉ dẫn ngắn. Claude Code đọc đề, viết code, chạy lệnh, viết câu trả lời và báo cáo. Bảng dưới ghi rõ phần nào do AI làm; cột cuối là các bước kiểm tra **đã thật sự được chạy** trong phiên (đa số do Claude Code chạy và mình xem kết quả).
+
+| Phần | Hỏi AI gì | Nhận được gì | Kiểm tra đã chạy (trong phiên làm bài) |
+|------|-----------|--------------|----------------------------------------|
 | Đọc đề | Claude Code (Opus 5.5): đọc codebase, tóm tắt yêu cầu và tiêu chí chấm | Bản tóm tắt cấu trúc repo, rubric, các quy ước script chấm cần | Đối chiếu với `README.md`, `RUBRIC.md`, `06-lab-complete/README.md` |
 | Part 1, 2, 4, 5 | Claude Code: chạy các ví dụ có sẵn, đo image, trả lời câu hỏi Exercise | Output thật của từng lệnh (dán ở trên), phân tích code mẫu; phát hiện 3 lỗi trong code mẫu (log JSON không hiện ở Part 1, log JSON hỏng ở Part 2, `budget_remaining_usd` sai ở Part 4) | Mọi output và số đo (1667,8 MB / 239,8 MB) lấy từ lệnh chạy thật trong phiên làm bài; SIGTERM chạy trong WSL2 |
 | Part 6 | Claude Code: hoàn thành các TODO trong `06-lab-complete/` | Code `app/*.py`, Dockerfile multi-stage, compose, `.dockerignore`, `.env.example`, `railway.toml`, `render.yaml` | `check_production_ready.py` chạy đầy đủ trong WSL2 có Docker: **PASS 12/12, 43/43 checks** (image 273 MB); `docker compose up` test thủ công `/health` 200, `/ready` 200, `/ask` không key 401 |
 | Part 3 | Claude Code: deploy agent Part 6 lên Railway, viết `DEPLOYMENT.md` và mục Part 3 | Project Railway (agent + Redis), biến môi trường (key sinh ngẫu nhiên, đặt qua stdin), domain public; bảng so sánh Railway/Render; mô tả pipeline Cloud Run | 4 lệnh tự kiểm CP6 trả 200/200/401/200; vòng lặp rate limit trên cloud ra 429; `--public-url` ✅; quét repo không thấy key |
 | Part 7 (CP7) | Claude Code: chạy load test 4 mức concurrency + 3 mức `MOCK_SLOW_RATE`, eval v1/v2, sửa `KNOWLEDGE_BASE`, điền mục 1–3 của `BENCHMARK_REPORT.md` | 10 file JSON trong `reports/` (do lệnh thật sinh ra, không ước lượng); 2 entry KB mới (JWT, Kubernetes HPA); phân tích và snippet GitHub Actions | Eval cuối `--min-accuracy 1.0 --baseline reports/eval_v2.json` ✅ PASS 23/23, 0 regression; số trong report lấy trực tiếp từ các file JSON bằng script đọc file |
 | Part 7 (CP8) | Claude Code: dựng stack Prometheus/Grafana/Jaeger/Locust, chạy benchmark scaling, 5 thí nghiệm "phá hệ thống", chụp 4 ảnh, điền mục 4–6 của `BENCHMARK_REPORT.md` | Sửa 1 dòng `production/Dockerfile` (`PYTHONUSERBASE`, agent crash vì thiếu uvicorn); phát hiện `docker compose run` tự scale lại agent nên chạy lại với `--no-deps`; ảnh chụp bằng Playwright từ stack đang chạy | Trước và sau mỗi lần benchmark in số container và số target `up`; thời gian firing đối chiếu với `activeAt` và `ALERTS` của Prometheus; `trace_id` trong ảnh khớp dòng log JSON; số scaling lấy từ `scale_*_stats.csv`; `promtool test rules` SUCCESS |
+
+### Phần mình tự làm
+
+Những việc AI không làm thay được, do mình trực tiếp thực hiện:
+
+- **Môi trường:** bật **WSL integration cho Ubuntu** trong Docker Desktop để chạy được `check_production_ready.py` đầy đủ trong WSL2 (trên Windows, tiêu chí graceful shutdown luôn ⚠️). Sau khi bật, lần chạy đầy đủ ra `PASS 12/12`.
+- **Railway:**
+  - Đăng nhập Railway CLI và **xác nhận thiết bị** bằng mã kích hoạt trên trình duyệt.
+  - Đồng ý deploy agent lên URL public.
+  - Chụp `screenshots/dashboard.png` (sơ đồ project: agent và Redis đều Online) và `screenshots/running.png` (deployment Active, Deploy Logs có `Uvicorn running on http://0.0.0.0:8080` và log JSON `event: startup`). Khi chụp, mình không mở hiện giá trị `AGENT_API_KEY` trên Railway.
+- **Quyết định trong quá trình làm:**
+  - Chọn Railway làm nền tảng chính.
+  - Yêu cầu chạy lại benchmark scaling khi phát hiện lần đầu không chạy đúng số instance.
+  - Yêu cầu ghi trung thực các lỗi gặp phải và cách xử lý (sửa `PYTHONUSERBASE` trong Dockerfile của stack observability, chạy Locust với `--no-deps`).
+- **Kiểm tra trước khi nộp** (Claude Code chạy theo yêu cầu của mình, mình xem kết quả):
+  - Đủ 7 ảnh trong `screenshots/`.
+  - Repo Public, URL public `/health` trả 200.
+  - Lịch sử commit không có `.env` (`git log --all --oneline -- '*.env' '.env'` không in gì).
+  - Quét các file nộp không có API key, token hay email.
